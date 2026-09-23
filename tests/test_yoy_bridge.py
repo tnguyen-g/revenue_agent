@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 
-from yoy_bridge import Segment, base_effect_split, driver_bridge, segment_bridge  # noqa: E402
+from yoy_bridge import Segment, base_effect_split, chain_bridge, driver_bridge, segment_bridge  # noqa: E402
 
 
 class SegmentBridgeTest(unittest.TestCase):
@@ -84,6 +84,29 @@ class BaseEffectSplitTest(unittest.TestCase):
         res = base_effect_split(100, 100, 100, 110, 0.0, 0.0)
         self.assertAlmostEqual(res["pp"]["ly_abnormal_base_effect"], res["delta_pp"])
         self.assertAlmostEqual(res["pp"]["ty_abnormal"], 0.0)
+
+
+
+class ChainBridgeTest(unittest.TestCase):
+    def test_matches_driver_bridge(self):
+        comps = {
+            "traffic": (1000, 1000, 950, 1000),
+            "orders": (50, 48, 45, 50),
+            "gb": (5000, 4700, 4400, 5100),
+        }
+        chain = chain_bridge([(k, v) for k, v in comps.items()])
+        drv = driver_bridge(comps)
+        self.assertAlmostEqual(chain["delta_pp"], drv["delta_pp"])
+        for step, key in zip(chain["steps"], ("traffic", "cvr", "aov")):
+            self.assertAlmostEqual(step["pp"], drv["delta_pp_by_driver"][key])
+
+    def test_steps_sum_to_delta(self):
+        res = chain_bridge([
+            ("imp", (100, 110, 90, 120)), ("udv", (10, 10, 9, 11)),
+            ("buy", (4, 4, 3, 5)), ("ord", (2, 2, 1.5, 2.6)),
+        ])
+        self.assertAlmostEqual(sum(s["pp"] for s in res["steps"]), res["delta_pp"])
+        self.assertEqual(res["steps"][2]["step"], "buy/udv")
 
 
 if __name__ == "__main__":

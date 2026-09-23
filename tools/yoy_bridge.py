@@ -34,6 +34,12 @@ Two views, both exact (components sum to the total change):
      + [ln TY normal - ln LY normal]     normal DOW seasonality drift
    allocated pro rata to the pp change, like the driver bridge.
 
+4. Funnel chain bridge (generalises 2 to any ordered funnel)
+   last stage = stage_0 x (stage_1 / stage_0) x ... x (stage_n / stage_n-1)
+   e.g. impressions -> UDV -> buy clicks -> checkout -> orders -> GB -> M1VFM.
+   Each step's change in log(TY/LY) from D-1 to D is allocated pro rata to
+   the pp change in YoY of the last stage.
+
 Input CSV columns (segment mode):
     dimension,segment,ty_d1,ly_d1,ty_d,ly_d
 Input CSV columns (driver mode):
@@ -185,6 +191,35 @@ def base_effect_split(ty_d1: float, ly_d1: float, ty_d: float, ly_d: float,
         "ty_dod": ty_d / ty_d1 - 1, "ly_dod": ly_d / ly_d1 - 1,
         "ty_normal_dod": ty_normal_dod, "ly_normal_dod": ly_normal_dod,
         "pp": {k: (v / total * delta_pp if total else 0.0) for k, v in parts.items()},
+    }
+
+
+def chain_bridge(chain: list[tuple[str, tuple[float, float, float, float]]]) -> dict:
+    """chain: ordered (name, (ty_d1, ly_d1, ty_d, ly_d)) funnel stages. Returns
+    per step the TY/LY ratio - 1 on each day and its share (pp) of the change
+    in YoY of the last stage. Step 0 is the first stage itself; step i is
+    stage_i / stage_i-1, labelled "stage_i/stage_i-1"."""
+    steps = []
+    for i, (name, v) in enumerate(chain):
+        if i == 0:
+            steps.append((name, v[0] / v[1], v[2] / v[3]))
+        else:
+            pname, p = chain[i - 1]
+            r1 = (v[0] / p[0]) / (v[1] / p[1])
+            r2 = (v[2] / p[2]) / (v[3] / p[3])
+            steps.append((f"{name}/{pname}", r1, r2))
+    last = chain[-1][1]
+    yoy_d1, yoy_d = last[0] / last[1] - 1, last[2] / last[3] - 1
+    delta_pp = yoy_d - yoy_d1
+    logs = {n: math.log(r2) - math.log(r1) for n, r1, r2 in steps}
+    total = sum(logs.values())
+    return {
+        "yoy_d1": yoy_d1, "yoy_d": yoy_d, "delta_pp": delta_pp,
+        "steps": [
+            {"step": n, "yoy_d1": r1 - 1, "yoy_d": r2 - 1,
+             "pp": (logs[n] / total * delta_pp if total else 0.0)}
+            for n, r1, r2 in steps
+        ],
     }
 
 
