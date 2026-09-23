@@ -4,9 +4,16 @@
 day-to-day (DtD) deceleration? Is it a real TY problem or an LY base effect,
 and what are the outcomes and follow-ups?
 
-**Status.** As of 2026-09-23 06:30 UTC, the first-pass bridge is done on
-unit economics (UE) and UNAGI (section 1). The 10:00 CEST stand-up reviews
-9/22 today. The open items are in [FOLLOWUPS.md](FOLLOWUPS.md).
+**Status.**
+- **First-pass bridge:** done on unit economics (UE) and UNAGI as of
+  2026-09-23 06:30 UTC (section 1).
+- **Funnel deep-dive:** done at 07:30 UTC, covering UV → deal view → buy-button
+  click → checkout → order by platform and traffic source (section 1e).
+- **Report:** a shareable HTML version is at
+  [report/na_yoy_bridge_2026-09-22.html](report/na_yoy_bridge_2026-09-22.html).
+  It is built by `build_report.py` from `data/` and is ready to upload to IQ.
+- **Stand-up:** the 10:00 CEST stand-up reviews 9/22 today.
+- **Open items:** see [FOLLOWUPS.md](FOLLOWUPS.md).
 
 **Conventions.**
 - D = Tue 2026-09-22 and D-1 = Mon 2026-09-21.
@@ -21,7 +28,7 @@ unit economics (UE) and UNAGI (section 1). The 10:00 CEST stand-up reviews
 |---|---:|---:|---:|
 | M1VFM (UE, M1 + VFM) | +5.5% | −2.6% | **−806 bps** |
 | Gross bookings (UE) | +13.0% | +1.9% | **−1,110 bps** |
-| Orders (UE) | +1.5% | −13.2% | −1,467 bps |
+| Orders (UE) | +1.5% | −13.2% | −1,468 bps |
 | UDVs (UNAGI) | −2.6% | −9.1% | −645 bps |
 | GB (Finance Tracker, cross-check) | +11.5% | +3.6% | −787 bps |
 
@@ -89,6 +96,10 @@ columns compare Tue/Mon with that segment's own normal (sql/03).
 | Affiliate | −92 bps | −118 bps | −7.2% (−1.8%) | +16.7% (+1.8%) | mostly LY |
 | SEO | −68 bps | – | −6.6% (+0.1%) | +11.4% (+2.6%) | TY softer, attribution issue open |
 
+*Updated by 1e.* The "TY-specific drop" readings compare Tue/Mon with normal.
+The touch reading especially reflects a strong TY Monday: touch orders were
++16.9% against the previous Monday but +5.6% on Tuesday.
+
 - **Deals.** The move is broad-based: no single deal exceeds ±$9.4K of the
   −$314K GB swing. This comes from the UE deal cut; sql/04 is the UNAGI
   version.
@@ -98,19 +109,77 @@ columns compare Tue/Mon with that segment's own normal (sql/03).
   Tue/Mon while web was flat (sql/05).
   - The JPROD-969 window (Orders Index API 404s, 11:42–15:10 UTC) is only
     about 1.4pp worse than the hours after it. It is **not** the main driver.
-  - The pattern points to a mobile-specific issue lasting all day. Check the
-    reCAPTCHA change (JPROD-955, "change is live" 9/22 04:01 UTC) and PayPal
-    auth.
+  - The funnel deep-dive (1e) puts this in checkout completion. Most of it is
+    Monday running unusually strong, not a Tuesday failure. The browser
+    checkout gap against August is the longer-running issue.
+
+### 1e. Funnel deep-dive: TY Tuesday was not weak; Monday and LY were the outliers
+
+**Week-over-week check** (UE, same weekday a week earlier; sql/09):
+
+| NA | TY Mon 9/21 vs 9/14 | TY Tue 9/22 vs 9/15 | LY Mon vs prior Mon | LY Tue vs prior Tue |
+|---|---:|---:|---:|---:|
+| Orders | +6.3% | **+1.5%** | **−7.1%** | +4.7% |
+| M1VFM | +2.8% | **+1.0%** | −0.3% | **+7.9%** |
+
+- TY Tuesday grew slightly against the previous Tuesday on every platform.
+- The YoY swing therefore sits in LY: a weak Monday comp, then a strong
+  order-discount Tuesday.
+- Part of the "TY weaker than normal" in 1a is a strong TY Monday: touch
+  orders were +16.9% against the previous Monday.
+
+**Full funnel** (sql/10, sql/11; data/na_full_funnel.csv, data/checkout_funnel_ty_baseline.csv):
+
+- **Upper funnel was normal.** UV, deal viewers, UDV and buy-button clicks per
+  UDV all moved in line.
+  - UV YoY went from −7.5% to −9.4%, which is −190 bps, mostly LY-driven.
+- **The Tue/Mon conversion drop sits entirely in checkout completion.**
+  Purchases per buy-click, Tue vs Mon:
+
+  | Platform | Tue vs Mon | Normal |
+  |---|---:|---:|
+  | iOS app | −6.1% | −2.5% |
+  | Android app | −4.1% | +0.6% |
+  | touch | −7.3% | +0.3% |
+  | web | −7.0% | −0.1% |
+
+- **Monday was the abnormal day, not Tuesday.** Completion on Mon 9/21
+  against Mon 9/14 was touch +17.5%, web +5.4%, iOS +4.8% and Android +5.4%.
+  Tue 9/22 against Tue 9/15 was touch +9.5%, iOS +0.2%, Android +1.5% and web
+  −2.0%.
+- **The bigger, ongoing issue is browser checkout.** Purchases per buy-click:
+
+  | Platform | Early August | 9/14–15 (reCAPTCHA blocks) | 9/22 |
+  |---|---:|---:|---:|
+  | touch | 28–29% | 22.8–22.9% | 24.9% |
+  | web | 35–36% | 30.8% | 30.2% |
+
+  - The apps held steady or improved over the same period.
+  - At August completion rates that is roughly 1–2K purchases a day on touch
+    plus web. This still needs checking for deal-mix and seasonality effects
+    (F13).
+- **Web anomaly on 9/22:** checkout views per buy-click were +12% against the
+  previous Tuesday while web orders were flat (+0.5%). This is consistent with
+  checkout reloads; check it against the JPROD-969 window (F15).
+- **Channels** (UNAGI funnel steps vs normal, sql/08):
+  - **Non-Brand SEM:** impressions fell about 8% Tue/Mon on app and touch. The
+    same drop happened on 8/24 and 9/14, so it looks like a weekday delivery
+    pattern rather than a 9/22 event (F3).
+  - **App push:** impressions −9.7% Tue/Mon against a normal +1% (F16).
+  - **App Direct:** conversion was the largest single TY-abnormal cell
+    (−127 bps). It is part of the checkout-completion pattern above.
 
 ### 1d. Draft stand-up line (house format)
 
 > **NORTH AMERICA:** M1VFM −2.6% YoY, −806 bps I GB +1.9% YoY, −1,110 bps
 > - Mostly an LY base effect. LY Tue 9/23 was an OD day (~$1.07M GB on OD
 >   campaigns vs ~$0.49M TY). TY GB was flat DtD.
-> - TY softness is in orders (−6.5% DtD vs −1.6% normal), about −210 bps of
->   M1VFM.
-> - Where: touch and app daytime (check reCAPTCHA JPROD-955), TTD Leisure,
->   NB SEM.
+> - TY Tuesday was not weak against last week: M1VFM +1.0% and orders +1.5% vs
+>   Tue 9/15.
+> - The Tue/Mon softness (about −210 bps M1VFM) is checkout completion
+>   falling back from an unusually strong Monday 9/21 on every platform.
+> - Ongoing risk: browser (touch and web) checkout completion is 3–6 points
+>   below August levels.
 > - Categories: Core Local −1,023 bps (HBW −697, TTD Leisure −594), National
 >   −411. Travel +311 on the EOQ Travel OD.
 > - Channels: Direct −423, NB SEM −327, Email −97, Affiliate −92.
@@ -131,7 +200,10 @@ or get dataview access (FOLLOWUPS F10).
 | **Must** | UE `kbc-grpn-35.out_c_ue_location_and_ownership.unit_economics` (view `finance_unit_economics.unit_economics`) | M1VFM, GB, GR, OD+ILS, orders; campaign, customer and category cuts; hourly | ✅ source table |
 | **Must** | UNAGI `kbc-grpn-35.out_c_unagi.unagi` (view `supply_unagi.unagi`) | Deal × platform × channel: UDVs, orders, GB, M1VFM | ✅ source table |
 | **Must** | UNAGI `daily_deal_traffic` + `deal_traffic_mapping`, `active_deals_daily`, `deal_datamart_agg` | Deal views and visitors, live and sold-out deals | ✅ source (`kbc-grpn-35`), not yet queried |
-| **Must** | Superfunnel `marketing.gbl_traffic_superfunnel_deal` / `_superfunnel` (source `kbc-grpn-14`) | Buy-button clicks, confirm and receipt views, sessions, bounce | ⛔ denied |
+| **Must** | UV: `kbc-grpn-28.out_c_rm_tracker.rm_tracker` (by traffic, de-duplicated) and `kbc-grpn-28.out_c_additional_views_rm_sheet.additional_view_rm_sheet` (by platform; D can be partial) | UV | ✅ |
+| **Must** | `kbc-grpn-28.in_c_tr_level_02_gpr_traffic_l1.agg_gbl_traffic_l1` (linked copy of `marketing.agg_gbl_traffic_l1`) | Impressions, UDV, deal viewers by platform, iOS/Android and traffic sub-source | ✅ |
+| **Must** | Janus `kbc-grpn-28.janus_impressions.junoHourly` plus `mvp_rt_traffic_metrics.daily_first_click_traffic_source_details` | Buy-button clicks, checkout views, checkout UV, purchases | ✅ TY only (retention from 2026-07-16) |
+| **Must** | Superfunnel `marketing.gbl_traffic_superfunnel(_deal)` (source `kbc-grpn-14`) and its linked copy `kbc-grpn-28.in_c_shr_web_traffic.*` | Sessions, bounce, and LY buy-clicks and checkout | ⛔ view denied; the copy is queryable but 3.4 TB and unpartitioned (120–620 GB per query) |
 | Support | Finance Tracker `out_daily_tracker_bq_new` (`_cy` / `_ly`), `rm_tracker`, `order_economics` | Tie-out to the official numbers | ✅ source |
 | Support | `checkoutfunnel.checkout_conversion`, `product_analytics.S3_session_funnel_summary` / `groupon_version_funnel_daily_agg` | Checkout, auth and fraud by platform (H2) | ⛔ denied |
 | Support | `marketing.roi_datamart_v2`, `adspend`, `adspend_hourly`, `marketing_traffic.roi_datamart_sem` | SEM spend, clicks, CPC (H4) | ⛔ denied |
@@ -211,12 +283,16 @@ Queries sql/01–06 plus the bridge tool produced section 1.
 | # | Hypothesis | Evidence so far | Test | Data | Meeting / owner |
 |---|---|---|---|---|---|
 | H1 | LY promo calendar: bigger OD Tuesday LY | Confirmed: ~$1.07M vs ~$0.49M OD GB | Campaign bridge (done). Pre-compute the next days' LY promo calendar | sql/06 | Jakub (F1) |
-| H2 | Mobile checkout friction (reCAPTCHA JPROD-955, PayPal auth after the 9/15 cutover, NA Breakdown errors −75% WoW) | touch orders −12% vs −3% normal; app and touch weak all US daytime; web flat | Checkout UV → complete → authorized by platform and hour, 9/21 vs 9/22; 403 RECAPTCHA rate; NA Elastic check for 9/22 | checkout_conversion (⛔), OPS Asana check, JPROD-955 | 11:30 CEST RevMan + Checkout & Payments; Ernesto Martin, Giovanni Lagasio (F2) |
+| H2 | Checkout friction (reCAPTCHA JPROD-955, PayPal auth after the 9/15 cutover, NA Breakdown errors −75% WoW) | **Partly explained.** The Tue/Mon drop is in purchases per buy-click on every platform, but Tue matched or beat the previous Tue; Mon 9/21 spiked (H9). Browser completion has been 3–6 points below August since late August (H8) | 403 RECAPTCHA rate and PayPal/3DS auth by platform and hour for 9/14–9/22; NA Elastic check for 9/22 | sql/11, OPS Asana check, JPROD-955 | 11:30 CEST RevMan + Checkout & Payments; Ernesto Martin, Giovanni Lagasio (F2) |
 | H3 | JPROD-969 Orders Index API 404s (11:42–15:10 UTC) | Window only ~1.4pp worse than the hours after it | Quantify orders lost in the window; read the incident review | sql/05, JPROD-969 | Jakub (F5) |
-| H4 | Non-Brand SEM: bidding or campaign migration (9/22 decision to move the remaining 25% to the new system) | NB SEM orders −9.3% vs −3.6% normal | Spend, clicks, CPC and conversions by campaign, 9/21 vs 9/22 and hourly; migration go-live time | adspend(_hourly), roi_datamart_sem (⛔) | Jakub + SEM team (F3) |
+| H4 | Non-Brand SEM: bidding or campaign migration (9/22 decision to move the remaining 25% to the new system) | NB SEM orders −9.3% vs −3.6% normal. Impressions fell about 8% Tue/Mon on app and touch, as they also did on 8/24 and 9/14, which points to a weekday delivery pattern | Spend, clicks, CPC and conversions by campaign and weekday since August; migration go-live time | adspend(_hourly), roi_datamart_sem (⛔) | Jakub + SEM team (F3) |
 | H5 | TTD Leisure / Core Local: promo roll-off, end of summer, supply | TTD Leisure orders −18.9% vs −4.8%; worst deals are all attractions | Deal list with live and sold-out status; campaign cover of those deals; seasonality vs 2024 | sql/04, active_deals_daily, deal_datamart_agg | 16:30 CEST RevMan + Top Supply (F4) |
 | H6 | Email sends issue (GPROD-567175, check_email_sends 9/22 failed) | TY email GB Tue/Mon +2.5% vs −2.5% normal, so a business impact is unlikely | Sends 9/21 vs 9/22 | emailing_datamart (⛔) | Managed Channels (F6) |
 | H7 | Data and attribution artefacts (SEO over-attribution since 6/15, push attribution, pending auths) | SEO orders −6.6% vs +0.1% | Re-run D on 9/24; check the attribution fix timeline | sql/00, BI | BI (F7) |
+| H8 | Browser checkout completion is structurally down (touch and web) | touch 28–29% → 24.9% and web 35–36% → 30.2% of buy-clicks since early August; apps flat or up | Completion by browser, OS and payment method since 8/1; overlay reCAPTCHA threshold changes, the PayPal cutover and 3DS | sql/11 extended; Checkout & Payments | Checkout & Payments (F13) |
+| H9 | Monday 9/21 checkout spike | Completion +5% to +17% vs the previous Monday on every platform | Cause: iOS reCAPTCHA threshold live 9/20 17:28? Monday checkout promos? | sql/06, sql/11, JPROD-955 | Jakub (F14) |
+| H10 | Web checkout reloads on 9/22 | Checkout views per buy-click +12% WoW; web orders flat | Hourly checkout views vs purchases on web, JPROD-969 window | junoHourly by hour | Jakub (F15) |
+| H11 | App push volume on 9/22 | App push impressions −9.7% Tue/Mon vs +1% normal | Push sends 9/21 vs 9/22 | push_datamart (⛔) | Managed Channels (F16) |
 
 **Exit:** every TY-abnormal bps is attributed or marked "unexplained".
 
@@ -239,7 +315,8 @@ Classify each explained piece. The class decides what "done" means.
 |---|---|---|---|
 | **Base effect** | LY OD-day spike (−12.7pp GB, −5.3pp M1VFM) | Annotate in the Daily Monitoring doc; no business action. Add an LY promo-calendar overlay to the daily bridge | Annotated; overlay live |
 | **Decision** | TY OD Tuesday about half LY's size (margin discipline?) | RevMan / promo owners confirm it was intended; quantify the GB vs M1VFM trade-off | Decision recorded with owner |
-| **Incident / tech** | Mobile checkout (H2), JPROD-969 (H3) | Jira ticket with owner; RevMan impact comment in JPROD; quantify $ | Ticket fixed; impact posted; metric back to normal |
+| **Incident / tech** | Checkout friction (H2), JPROD-969 (H3), web reloads (H10) | Jira ticket with owner; RevMan impact comment in JPROD; quantify $ | Ticket fixed; impact posted; metric back to normal |
+| **Structural** | Browser checkout completion 3–6 points below August (H8) | Checkout & Payments owns a recovery plan with a target completion rate by platform, with the gap in purchases/day tracked daily | Completion back to its August level, or the gap explained by mix |
 | **Channel** | NB SEM (H4) | SEM team review; hold the 50% migration step if the new system is implicated | Root cause stated; spend and CVR normal |
 | **Supply / category** | TTD Leisure, Core Local (H5) | Supply review of the losing deals | Deal actions logged |
 | **Data** | Pending auths, refresh failures, SEO attribution (H7) | Re-run; BI tickets | Numbers stable; tickets closed |
@@ -267,6 +344,6 @@ were concentrated on one person. From here:
 | 08:30 | Phase 0 checks; post the section-1 read to the team |
 | 10:00 | Daily Revenue Stand-up: present 1d; confirm owners for F1–F10 |
 | 10:30 | Jakub / Michal Hromek, "Rev Man automatic solution": scope automating this bridge |
-| 11:30 | RevMan + Checkout & Payments: H2 with platform/hour evidence |
+| 11:30 | RevMan + Checkout & Payments: H2/H8/H10 with the checkout-completion chart (report section 4) |
 | 16:30 | RevMan + Top Supply & Supply Health: H5 deal list |
 | EOD | Update FOLLOWUPS.md statuses; re-run for 9/23 once UE and UNAGI land (~06:30 UTC 9/24) |

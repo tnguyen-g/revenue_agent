@@ -99,28 +99,32 @@ def baseline() -> dict[tuple[str, str], dict[str, tuple[float, float]]]:
 # SVG charts (static, per-mark <title> tooltips, colors via CSS tokens)
 # --------------------------------------------------------------------------
 
-def line_chart(series: list[tuple[str, str, list[tuple[str, float]]]], height: int = 260) -> str:
+def line_chart(series: list[tuple[str, str, list[tuple[str, float]]]], height: int = 260,
+               zero: bool = True, fmt: str = "{:+.0f}%",
+               aria: str = "Daily M1VFM YoY by platform") -> str:
     """series: (label, css color var, [(x label, y value)])."""
-    w, h, ml, mr, mt, mb = 760, height, 44, 96, 16, 30
+    w, h, ml, mr, mt, mb = 760, height, 44, 150, 16, 30
     xs = [x for x, _ in series[0][2]]
     ys = [y for _, _, pts in series for _, y in pts]
-    lo, hi = min(ys + [0.0]), max(ys + [0.0])
+    lo, hi = (min(ys + [0.0]), max(ys + [0.0])) if zero else (min(ys), max(ys))
     pad = (hi - lo) * 0.08
     lo, hi = lo - pad, hi + pad
     px = lambda i: ml + i * (w - ml - mr) / (len(xs) - 1)  # noqa: E731
     py = lambda v: mt + (hi - v) * (h - mt - mb) / (hi - lo)  # noqa: E731
-    out = [f'<svg viewBox="0 0 {w} {h}" class="chart" role="img" '
-           f'aria-label="Daily M1VFM YoY by platform">']
+    out = [f'<svg viewBox="0 0 {w} {h}" class="chart" role="img" aria-label="{esc(aria)}">']
     step = 0.05
     t = (lo // step + 1) * step
     while t < hi:
         y = py(t)
-        cls = "axis" if abs(t) < 1e-9 else "grid"
+        cls = "axis" if zero and abs(t) < 1e-9 else "grid"
         out.append(f'<line class="{cls}" x1="{ml}" x2="{w - mr}" y1="{y:.1f}" y2="{y:.1f}"/>')
-        out.append(f'<text class="tick" x="{ml - 6}" y="{y + 4:.1f}" text-anchor="end">{t * 100:+.0f}%</text>')
+        out.append(f'<text class="tick" x="{ml - 6}" y="{y + 4:.1f}" text-anchor="end">{fmt.format(t * 100)}</text>')
         t += step
     for i, x in enumerate(xs):
         out.append(f'<text class="tick" x="{px(i):.1f}" y="{h - 10}" text-anchor="middle">{esc(x)}</text>')
+    if len(xs) > 9:  # long date axes: drop the weekday to fit
+        out = [o.replace(">Mon ", ">").replace(">Tue ", ">") if o.startswith('<text class="tick"') else o
+               for o in out]
     for label, color, pts in series:
         d = " ".join(f"{'M' if i == 0 else 'L'}{px(i):.1f},{py(v):.1f}" for i, (_, v) in enumerate(pts))
         width = 2.5 if label.startswith("NA") else 2
@@ -130,7 +134,7 @@ def line_chart(series: list[tuple[str, str, list[tuple[str, float]]]], height: i
             out.append(f'<circle cx="{px(i):.1f}" cy="{py(v):.1f}" r="4" fill="var({color})" '
                        f'stroke="var(--surface-1)" stroke-width="2"/>')
             out.append(f'<circle cx="{px(i):.1f}" cy="{py(v):.1f}" r="11" class="hit">'
-                       f'<title>{esc(label)} · {esc(x)}: {v * 100:+.1f}% YoY</title></circle>')
+                       f'<title>{esc(label)} · {esc(x)}: {fmt.format(v * 100)}</title></circle>')
     # direct labels at the line ends, nudged apart so they never overlap
     ends = sorted(((py(pts[-1][1]), label, pts[-1][1]) for label, _, pts in series))
     placed: list[float] = []
@@ -138,7 +142,7 @@ def line_chart(series: list[tuple[str, str, list[tuple[str, float]]]], height: i
         y = max(y, placed[-1] + 15) if placed else y
         placed.append(y)
         out.append(f'<text class="dlabel" x="{px(len(xs) - 1) + 10:.1f}" y="{y + 4:.1f}">'
-                   f'{esc(label)} {v * 100:+.1f}%</text>')
+                   f'{esc(label)} {v * 100:{"+" if zero else ""}.1f}%</text>')
     out.append("</svg>")
     return "".join(out)
 
@@ -352,6 +356,133 @@ def funnel_vs_normal_section() -> str:
             "the exact DtD within a few bps.</p>")
 
 
+
+def full_funnel_section() -> str:
+    """UV -> UDV visitors -> UDV -> orders (TY vs LY) plus TY-only checkout steps."""
+    f = {(r["platform"], r["traffic"]): r for r in rows("na_full_funnel.csv")}
+
+    def g(r, col):
+        return tuple(float(r[f"{col}_{b}"]) if r.get(f"{col}_{b}") not in ("", None) else None
+                     for b in BUCKETS)
+
+    def ty(r, col):
+        return float(r[f"{col}_ty_d1"]), float(r[f"{col}_ty_d"])
+
+    labels = {"ALL": "NA", "app": "app", "app_iOS": "app · iOS", "app_Android": "app · Android",
+              "touch": "touch", "web": "web"}
+    trs = []
+    for pf in ("ALL", "app", "app_iOS", "app_Android", "touch", "web"):
+        r = f[(pf, "ALL")]
+        chain = []
+        if pf == "ALL":
+            chain.append(("UV", g(r, "uvrmt")))
+        chain += [("UDV visitors", g(r, "udvv")), ("UDV", g(r, "udv")), ("orders", g(r, "ord"))]
+        res = chain_bridge(chain)
+        st_ = {x["step"]: x for x in res["steps"]}
+        order = (["UV", "UDV visitors/UV"] if pf == "ALL" else ["UDV visitors", None]) + [
+            "UDV/UDV visitors", "orders/UDV"]
+        cells = []
+        for key in order:
+            s2 = st_.get(key) if key else None
+            cells.append("<td>–</td>" if s2 is None else
+                         f"<td><span class='yoy'>{pct0(s2['yoy_d1'])} → {pct0(s2['yoy_d'])}</span>"
+                         f"<span class='share {sign_class(s2['pp'], 0.002)}'>{s2['pp'] * 100:+.1f}pp</span></td>")
+        b1, b2 = ty(r, "bbc")
+        c1, c2 = ty(r, "chkuv")
+        u1, u2 = ty(r, "udv")
+        o1, o2 = ty(r, "ord")
+        tyc = [(b2 / u2) / (b1 / u1) - 1, (c2 / b2) / (c1 / b1) - 1, (o2 / c2) / (o1 / c1) - 1]
+        cls = "total" if pf in ("ALL", "app", "touch", "web") else ""
+        trs.append(f"<tr class='{cls}'><td>{labels[pf]}</td>"
+                   f"<td>{pct(res['yoy_d1'])} → {pct(res['yoy_d'])}</td>" + "".join(cells)
+                   + "".join(f"<td class='{sign_class(x, 0.02)}'>{pct(x)}</td>" for x in tyc) + "</tr>")
+    head = ("<table class='num funnel'><thead><tr><th rowspan='2'>Platform</th>"
+            "<th rowspan='2'>Orders YoY Mon → Tue</th>"
+            "<th colspan='4'>YoY Mon → Tue (share of orders DtD)</th>"
+            "<th colspan='3'>TY only: Tue vs Mon</th></tr><tr>"
+            "<th>Visitors</th><th>Deal viewers / UV</th><th>UDV / deal viewer</th><th>Orders / UDV</th>"
+            "<th>Buy-clicks / UDV</th><th>Checkout UV / buy-click</th><th>Orders / checkout UV</th></tr></thead><tbody>")
+    note = ("<p class='note'>NA row: UV from the RM tracker (de-duplicated). Platform rows: UDV visitors "
+            "(people who viewed at least one deal) stand in for UV, because platform-level UV for 9/22 was "
+            "still partial. UDV visitors and checkout UV are sums of distinct counts, so they are "
+            "approximate. Buy-button clicks and checkout exist only for TY (Janus retention starts "
+            "2026-07-16). Orders: UE, distinct parent orders.</p>")
+    return head + "".join(trs) + "</tbody></table>" + note
+
+
+def traffic_funnel_section() -> str:
+    f = {(r["platform"], r["traffic"]): r for r in rows("na_full_funnel.csv")}
+    order = ["Direct", "SEM (all)", "Non Brand SEM", "Brand SEM", "SEM PLA", "SEO", "Email",
+             "Push Notification", "Affiliate", "Display", "Other"]
+    trs = []
+    for tb in order:
+        r = f[("ALL", tb)]
+        vals = {c: tuple(float(r[f"{c}_{b}"]) for b in BUCKETS) for c in ("uvrmt", "udv", "ord")}
+        y = lambda v, i: v[2 * i] / v[2 * i + 1] - 1  # noqa: E731  i=0 Mon, 1 Tue
+        uv, udv, od = vals["uvrmt"], vals["udv"], vals["ord"]
+        conv1 = (od[0] / uv[0]) / (od[1] / uv[1]) - 1
+        conv2 = (od[2] / uv[2]) / (od[3] / uv[3]) - 1
+        tyb = (float(r["bbc_ty_d"]) / float(r["bbc_ty_d1"])) - 1
+        tyo = (od[2] / od[0]) - 1
+        sub = "sub" if tb in ("Non Brand SEM", "Brand SEM", "SEM PLA") else ""
+        trs.append(f"<tr class='{sub}'><td>{esc(tb)}</td>"
+                   f"<td>{pct(y(uv, 0))} → {pct(y(uv, 1))}</td>"
+                   f"<td>{pct(y(udv, 0))} → {pct(y(udv, 1))}</td>"
+                   f"<td>{pct(y(od, 0))} → {pct(y(od, 1))}</td>"
+                   f"<td class='{sign_class(conv2 - conv1)}'>{pct(conv1)} → {pct(conv2)}</td>"
+                   f"<td>{pct(tyb)}</td><td>{pct(tyo)}</td></tr>")
+    return ("<table class='num'><thead><tr><th>Traffic source (all platforms)</th><th>UV YoY Mon → Tue</th>"
+            "<th>UDV YoY</th><th>Orders YoY</th><th>Orders / UV YoY</th><th>TY buy-clicks Tue vs Mon</th>"
+            "<th>TY orders Tue vs Mon</th></tr></thead><tbody>" + "".join(trs) + "</tbody></table>"
+            "<p class='note'>UV: RM tracker, NA, de-duplicated across platforms. Buy-clicks use the "
+            "real-time first-click attribution (PLA falls into Non Brand SEM), so compare SEM at the "
+            "SEM (all) row.</p>")
+
+
+def checkout_trend_section() -> tuple[str, str]:
+    data = rows("checkout_funnel_ty_baseline.csv")
+    v = {(r["segment"], r["date"]): {k: float(r[k]) for k in r if k not in ("segment", "date")} for r in data}
+    dates = sorted({r["date"] for r in data})
+    segs = [("app · iOS", "app_iOS", "--series-1"), ("app · Android", "app_Android", "--series-4"),
+            ("touch", "touch", "--series-2"), ("web", "web", "--series-3")]
+    series = [(label, color, [(dt.date.fromisoformat(d).strftime("%a %d %b"),
+                               v[(seg, d)]["janus_purchases"] / v[(seg, d)]["buy_clicks"]) for d in dates])
+              for label, seg, color in segs]
+    chart = line_chart(series, height=280, zero=False, fmt="{:.0f}%", aria="Purchases per buy-click")
+    legend = ('<div class="legend">' + "".join(
+        f'<span><i style="background:var({c})"></i>{esc(lab)}</span>' for lab, _, c in segs) + "</div>")
+    pairs = [("2026-08-10", "2026-08-11"), ("2026-08-17", "2026-08-18"), ("2026-08-24", "2026-08-25"),
+             ("2026-09-14", "2026-09-15")]
+    steps = [("UDV", lambda x: x["udv"]),
+             ("Buy-clicks / UDV", lambda x: x["buy_clicks"] / x["udv"]),
+             ("Checkout views / buy-click", lambda x: x["checkout_views"] / x["buy_clicks"]),
+             ("Purchases / buy-click", lambda x: x["janus_purchases"] / x["buy_clicks"]),
+             ("UE orders", lambda x: x["ue_orders"])]
+    trs = []
+    for label, seg, _ in segs:
+        for i, (name, fn) in enumerate(steps):
+            act = fn(v[(seg, "2026-09-22")]) / fn(v[(seg, "2026-09-21")]) - 1
+            norm = statistics.median(fn(v[(seg, b)]) / fn(v[(seg, a)]) - 1 for a, b in pairs)
+            wtue = fn(v[(seg, "2026-09-22")]) / fn(v[(seg, "2026-09-15")]) - 1
+            wmon = fn(v[(seg, "2026-09-21")]) / fn(v[(seg, "2026-09-14")]) - 1
+            gap = act - norm
+            trs.append(f"<tr class='{'total' if i == 0 else ''}'><td>{esc(label) if i == 0 else ''}</td>"
+                       f"<td class='lbl'>{name}</td><td>{pct(act)}</td><td>{pct(norm)}</td>"
+                       f"<td class='{sign_class(gap, 0.02)}'><b>{gap * 100:+.1f}pp</b></td>"
+                       f"<td class='{sign_class(wmon, 0.03)}'>{pct(wmon)}</td>"
+                       f"<td class='{sign_class(wtue, 0.03)}'>{pct(wtue)}</td></tr>")
+    table = ("<table class='num'><thead><tr><th>Platform</th><th class='lbl'>Step</th><th>TY Tue/Mon</th>"
+             "<th>Normal Tue/Mon</th><th>Gap</th><th>Mon 9/21 vs Mon 9/14</th><th>Tue 9/22 vs Tue 9/15</th>"
+             "</tr></thead><tbody>" + "".join(trs) + "</tbody></table>")
+    trend_tbl = ["<table class='num'><thead><tr><th>Purchases / buy-click</th>"
+                 + "".join(f"<th>{d[5:]}</th>" for d in dates) + "</tr></thead><tbody>"]
+    for label, _, pts in series:
+        trend_tbl.append(f"<tr><td>{esc(label)}</td>" + "".join(f"<td>{y * 100:.1f}%</td>" for _, y in pts) + "</tr>")
+    trend_tbl.append("</tbody></table>")
+    return (chart + legend + "<details><summary>Table view</summary>" + "".join(trend_tbl) + "</details>",
+            table)
+
+
 def segment_section(pivot, base) -> str:
     out = []
     labels = {"lob_category": "Division (LOB)", "grt_l2": "Category (L2)",
@@ -404,21 +535,12 @@ def hourly_section() -> str:
             "</tr></thead><tbody>" + "".join(trs) + "</tbody></table>")
 
 
-def checkout_section() -> str:
-    path = os.path.join(DATA, "checkout_funnel_platform.csv")
-    if not os.path.exists(path):
-        return ("<p class='callout'>UV, buy-button clicks and checkout steps are not in UNAGI. "
-                "Their sources (superfunnel, checkout conversion, product funnel) are not "
-                "queryable from FoundryAI today; see follow-up F10.</p>")
-    return open(path.replace(".csv", ".html")).read() if os.path.exists(path.replace(".csv", ".html")) else ""
-
-
 CSS = """
 :root {
   color-scheme: light;
   --page: #f9f9f7; --surface-1: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
   --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
-  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --ink-series: #0b0b0b;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --ink-series: #0b0b0b;
   --div-pos: #2a78d6; --div-neg: #e34948; --div-mid: #f0efec;
   --good: #006300; --bad: #b42626;
 }
@@ -427,7 +549,7 @@ CSS = """
     color-scheme: dark;
     --page: #0d0d0d; --surface-1: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
-    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --ink-series: #ffffff;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --ink-series: #ffffff;
     --div-pos: #3987e5; --div-neg: #e66767; --div-mid: #383835;
     --good: #0ca30c; --bad: #e66767;
   }
@@ -436,7 +558,7 @@ CSS = """
   color-scheme: dark;
   --page: #0d0d0d; --surface-1: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
   --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
-  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --ink-series: #ffffff;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --ink-series: #ffffff;
   --div-pos: #3987e5; --div-neg: #e66767; --div-mid: #383835;
   --good: #0ca30c; --bad: #e66767;
 }
@@ -462,13 +584,16 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { padding: 5px 8px; border-bottom: 1px solid var(--grid); text-align: left; vertical-align: top; }
 th { color: var(--ink-2); font-weight: 600; }
 table.num td:not(:first-child), table.num th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+table.num td.lbl, table.num th.lbl { text-align: left; }
+tr.sub td:first-child { padding-left: 20px; color: var(--ink-2); }
 tr.total td { font-weight: 600; background: color-mix(in oklab, var(--grid) 35%, transparent); }
 .pos { color: var(--good); } .neg { color: var(--bad); }
 td.heat { color: var(--ink); text-align: center !important; font-variant-numeric: tabular-nums; }
 .funnel td span { display: block; } .funnel .share { font-size: 12px; }
 .note { color: var(--muted); font-size: 12.5px; }
 .callout { background: color-mix(in oklab, var(--series-2) 10%, var(--surface-1)); border-radius: 8px; padding: 10px 12px; }
-.chart { width: 100%; height: auto; display: block; }
+.chart { width: 100%; min-width: 600px; height: auto; display: block; }
+.chart.bars { min-width: 320px; }
 .chart .grid { stroke: var(--grid); stroke-width: 1; }
 .chart .axis { stroke: var(--axis); stroke-width: 1; }
 .chart .tick { fill: var(--muted); font-size: 11px; }
@@ -489,6 +614,7 @@ def build() -> str:
     pivot = load_pivot()
     base = baseline()
     tiles, k = headline(ue)
+    ck_chart, ck_table = checkout_trend_section()
     base_html, be = base_effect_section(pivot, base)
     m1 = be["M1VFM"]["pp"]
     body = f"""
@@ -510,9 +636,13 @@ Monday was weak (−7.1% orders vs the previous Monday). The LY base effect is
 <li><b>TY Tuesday was not weak against its own last week:</b> M1VFM +1.0% and orders +1.5% vs Tue
 9/15. Against the normal Mon→Tue pattern TY looks {bps(m1['ty_abnormal'])} bps weaker, but part of
 that is a strong TY Monday (touch orders +16.9% vs the previous Monday).</li>
-<li><b>Where TY does look soft (funnel):</b> conversion (orders/UDV) on touch and app Direct, Non-Brand
-SEM impressions on app and touch (a Mon→Tue drop that has recurred three weeks running), and
-app push impressions. Higher AOV (Travel) offsets most of it.</li>
+<li><b>Funnel:</b> upper funnel (UV, deal views, buy-button clicks per UDV) moved normally. The Tue/Mon
+conversion drop sits entirely in <b>checkout completion</b> (purchases per buy-click −4% to −7% on every
+platform vs a normal ~0%), and it is Monday that is abnormal: completion on Mon 9/21 was +5% to +17% above
+Mon 9/14, while Tue 9/22 matched or beat Tue 9/15.</li>
+<li><b>The real, ongoing issue is browser checkout:</b> touch completion ~25% of buy-clicks vs 26–29% in
+August (22.8% at the 9/14–15 reCAPTCHA low), web ~30% vs 34–36%; the apps held. Also watch: Non-Brand SEM
+impressions drop Mon→Tue for the third week running (weekday delivery pattern), app push impressions −9.7%.</li>
 <li><b>Not the driver:</b> JPROD-969 (Orders Index API 404s, 11:42–15:10 UTC) is only ~1.4pp worse
 than the hours after it.</li>
 </ul>
@@ -534,39 +664,59 @@ the 9/14–9/16 run rate. Source: UE, NA, operational columns.</p></div>
 platform; the swing sits in LY (weak Monday, strong OD Tuesday). Touch's Tue/Mon drop is mostly a hot TY
 Monday. Caveat: 9/14–9/15 were themselves hit by reCAPTCHA blocks (JPROD-955/957), so WoW may flatter TY.</p></div>
 
-<h2>4. Funnel by platform and traffic source</h2>
+<h2>4. Funnel: UV → deal view → buy-button click → checkout → order</h2>
+<div class="card"><h3 style="margin-top:0">By platform</h3>
+{full_funnel_section()}</div>
+<div class="card"><h3 style="margin-top:0">By traffic source</h3>
+{traffic_funnel_section()}</div>
+<div class="card"><h3 style="margin-top:0">Checkout completion: purchases per buy-button click, TY (Janus)</h3>
+{ck_chart}
+<p class="note">Browser checkout (touch, web) has lost 4–6 points since August while the apps held; the
+low was 9/14–9/15 (reCAPTCHA blocks, JPROD-955/957). Mon 9/21 spiked on every platform and Tue 9/22 fell back.</p>
+<h3>Tue/Mon by funnel step vs normal, and week-over-week</h3>
+{ck_table}
+<p class="note">Normal = median Tue/Mon of 8/10, 8/17, 8/24, 9/14. The Tue/Mon gap sits in
+purchases per buy-click on every platform, but against the previous week Tuesday is flat or better and
+Monday is the outlier. Web: checkout views per buy-click +12% vs the previous Tuesday with orders flat,
+consistent with checkout reloads (check against the JPROD-969 window).</p></div>
+
+<h2>5. Funnel by platform × traffic source (UNAGI, to M1VFM)</h2>
 <div class="card"><h3 style="margin-top:0">Impressions → UDV → orders → GB → M1VFM, YoY Mon → Tue</h3>
 {funnel_levels_section()}</div>
 <div class="card"><h3 style="margin-top:0">Which funnel step is abnormal this year? (TY Tue/Mon vs normal, bps of NA M1VFM DtD)</h3>
 {funnel_vs_normal_section()}</div>
-<div class="card"><h3 style="margin-top:0">UV → buy-button click → checkout → order</h3>
-{checkout_section()}</div>
 
-<h2>5. Segment bridge (UNAGI)</h2>
+<h2>6. Segment bridge (UNAGI)</h2>
 <div class="card">{segment_section(pivot, base)}
 <p class="note">GB and M1VFM DtD in bps of NA YoY. TY/LY Tue/Mon columns come from
 the Mon/Tue baseline (normal in brackets); "–" where no baseline was pulled.</p></div>
 
-<h2>6. Hourly orders (UE)</h2>
+<h2>7. Hourly orders (UE)</h2>
 <div class="card">{hourly_section()}</div>
 
-<h2>7. Outcomes and follow-ups</h2>
+<h2>8. Outcomes and follow-ups</h2>
 <div class="card"><ul class="tight">
 <li><b>Base effect (no business action):</b> annotate 9/22 in the Daily Monitoring doc; pre-compute the LY
 promo calendar for 9/23–9/30 so LY OD/ILS days are flagged before they read as deterioration (F1).</li>
 <li><b>Decision:</b> TY's Tuesday OD push was about half of LY's. Confirm that was intended (margin discipline)
 and size the GB vs M1VFM trade-off for the October exit rate (F11).</li>
-<li><b>Mobile conversion:</b> touch CVR −9.0% Tue/Mon vs +1.6% normal. Check whether it is TY Monday strength
-(reCAPTCHA iOS fix live 9/20 17:28) or a Tuesday checkout issue. Needs checkout-step data (F2, F10).</li>
+<li><b>Browser checkout completion (new, highest value):</b> touch and web purchases per buy-click are 3–6
+points below August. At August rates that is roughly 1–2K purchases a day (to be validated for deal mix).
+Take to Checkout &amp; Payments with reCAPTCHA thresholds (JPROD-955/957), the PayPal REST cutover (9/15)
+and 3DS (JPROD-737) as candidates (F13).</li>
+<li><b>Monday 9/21 checkout spike:</b> completion +5% to +17% vs the previous Monday on every platform. Find
+the cause (iOS reCAPTCHA threshold live 9/20 17:28, Monday checkout promos) so the right baseline is used (F14).</li>
+<li><b>Web checkout reloads:</b> checkout views per buy-click +12% WoW on 9/22 with orders flat; check
+against the JPROD-969 window and checkout error logs (F15).</li>
 <li><b>Non-Brand SEM:</b> impressions −8% Tue/Mon on app and touch, the third week in a row. Likely a weekday
 bidding or budget pattern, not a 9/22 incident; confirm with the SEM team alongside the campaign migration (F3).</li>
-<li><b>App push:</b> impressions −9.7% Tue/Mon vs +1% normal. Check push send volume on 9/22 (new).</li>
+<li><b>App push:</b> impressions −9.7% Tue/Mon vs +1% normal. Check push send volume on 9/22 (F16).</li>
 <li><b>TTD Leisure / Core Local:</b> review the losing attractions deals at the Top Supply meeting (F4).</li>
 <li><b>Re-run 9/24</b> once pending authorizations settle ($36K on 9/22) and watch 9/23–9/25 for recovery (F7, F8).</li>
 </ul>
 <p class="note">Full register with owners and due dates: FOLLOWUPS.md in the repo.</p></div>
 
-<h2>8. Data and caveats</h2>
+<h2>9. Data and caveats</h2>
 <div class="card"><ul class="tight">
 <li>UE: <code>kbc-grpn-35.out_c_ue_location_and_ownership.unit_economics</code> (behind
 <code>finance_unit_economics.unit_economics</code>). UNAGI: <code>kbc-grpn-35.out_c_unagi.unagi</code>.
@@ -576,7 +726,12 @@ within ~0.6%.</li>
 <li>UNAGI orders are counted at deal × platform × channel grain (multi-deal orders count more than once), and
 channel attribution on the traffic side may differ from the order side.</li>
 <li>$36K GB on 9/22 was still in pending authorization at extraction (±1.1pp on D).</li>
-<li>Not queryable today: superfunnel (UV, buy-button clicks), checkout conversion, ad spend, email/push sends.</li>
+<li>Funnel sources (queryable): UV from the RM tracker (<code>kbc-grpn-28.out_c_rm_tracker.rm_tracker</code>);
+impressions, UDV and deal viewers from <code>kbc-grpn-28.in_c_tr_level_02_gpr_traffic_l1.agg_gbl_traffic_l1</code>;
+buy-button clicks, checkout views and purchases from Janus <code>kbc-grpn-28.janus_impressions.junoHourly</code>
+(TY only, retention from 2026-07-16).</li>
+<li>Not available: LY buy-clicks/checkout and bounce/sessions (only in the 3.4 TB superfunnel copy, 120–620 GB
+per query), checkout conversion and product funnel tables, ad spend, email/push sends (access denied).</li>
 </ul></div>
 </main>"""
     return ("<!doctype html><html lang='en'><head><meta charset='utf-8'>"
