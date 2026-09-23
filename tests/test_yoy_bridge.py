@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 
-from yoy_bridge import Segment, driver_bridge, segment_bridge  # noqa: E402
+from yoy_bridge import Segment, base_effect_split, driver_bridge, segment_bridge  # noqa: E402
 
 
 class SegmentBridgeTest(unittest.TestCase):
@@ -65,6 +65,25 @@ class DriverBridgeTest(unittest.TestCase):
             prod = math.prod(1 + v for v in res[day].values())
             yoy = res["yoy_d1"] if day.endswith("d1") else res["yoy_d"]
             self.assertAlmostEqual(prod, 1 + yoy)
+
+    def test_value_component_adds_margin_term(self):
+        comps = dict(self.components, value=(1200, 1100, 1000, 1150))
+        res = driver_bridge(comps)
+        self.assertIn("margin", res["delta_pp_by_driver"])
+        self.assertAlmostEqual(res["yoy_d"], 1000 / 1150 - 1)
+        self.assertAlmostEqual(sum(res["delta_pp_by_driver"].values()), res["delta_pp"])
+
+
+class BaseEffectSplitTest(unittest.TestCase):
+    def test_parts_sum_to_delta(self):
+        res = base_effect_split(100, 90, 100, 100, -0.01, -0.01)
+        self.assertAlmostEqual(sum(res["pp"].values()), res["delta_pp"])
+
+    def test_pure_ly_spike_is_base_effect(self):
+        # TY moves exactly as normal, LY jumps 10% instead of its normal 0%.
+        res = base_effect_split(100, 100, 100, 110, 0.0, 0.0)
+        self.assertAlmostEqual(res["pp"]["ly_abnormal_base_effect"], res["delta_pp"])
+        self.assertAlmostEqual(res["pp"]["ty_abnormal"], 0.0)
 
 
 if __name__ == "__main__":
